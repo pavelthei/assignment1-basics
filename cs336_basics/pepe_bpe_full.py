@@ -110,6 +110,7 @@ class PepeBPEFull:
 
     def __init__(self):
         self.vocab: dict[bytes, int] = defaultdict(int)
+        self.special_tokens: list[str] = []
         self.merges: list[tuple[bytes, bytes]] = []
         self.last_free_index: int = 0
 
@@ -142,7 +143,6 @@ class PepeBPEFull:
                                num_chunks: int = 128,
                                num_processes: int = 8,
                                **kwargs):
-
         for i in range(256):
             self.vocab[self.last_free_index] = bytes([i])
             self.last_free_index += 1
@@ -150,6 +150,8 @@ class PepeBPEFull:
         for token in special_tokens:
             self.vocab[self.last_free_index] = token.encode()
             self.last_free_index += 1
+
+        self.special_tokens = special_tokens
 
         with open(input_path, "rb") as f:
             special_tokens_pattern = _create_special_tokens_pattern(special_tokens)
@@ -196,18 +198,35 @@ class PepeBPEFull:
 
     def save_vocab(self, vocab_path: str):
         os.makedirs(vocab_path, exist_ok=True)
-        space_token = " "
         with open(os.path.join(vocab_path, "tokenizer.json"), "w") as f:
             f.write(
                 json.dumps(
-                    {"tokens": {''.join(map(lambda x: chr(x), token)): i for i, token in self.vocab.items()},
-                    "merges": [''.join(map(lambda x: chr(x), pair[0])) + space_token + ''.join(map(lambda x: chr(x), pair[1])) for pair in self.merges],
+                    {"tokens": {
+                        "trained": {token.decode("latin-1"): i for i, token in self.vocab.items()},
+                        "special_tokens":self.special_tokens,
+                    },
+                     "merges": [[pair[0].decode("latin-1"), pair[1].decode("latin-1")] for pair in self.merges],
+                     "last_free_index": self.last_free_index,
                     })
                 )
+
+    # def encode(self, s: str) -> list[int]:
+    #     # 1. pre-tokenize
+    #     pretokenized_tokens = _pretokenize_chunk(s.encode("utf-8"), PAT, )
+    #     # 2. apply merges
+
+    def load_vocab(self, vocab_path: str):
+        with open(os.path.join(vocab_path, "tokenizer.json"), "r") as f:
+            tokens = json.loads(f.read())
+            self.last_free_index = int(tokens["last_free_index"])
+            self.tokens = {v.encode("latin-1"): i for v, i in tokens["tokens"]["trained"].items()}
+            self.special_tokens = tokens["tokens"]["special_tokens"]
+            self.merges = [(v[0].encode("latin-1"), v[1].encode("latin-1")) for v in tokens["merges"]]
 
 
 if __name__ == "__main__":
     tokenizer = PepeBPEFull()
-    tokenizer.train_bpe_from_scratch("data/TinyStoriesV2-GPT4-train.txt", 10000, ["<|endoftext|>"])
-    tokenizer.save_vocab("data/vocab")
+    DATA_PATH = "data/TinyStoriesV2-GPT4-train.txt"
+    tokenizer.train_bpe_from_scratch(DATA_PATH, 10000, ["<|endoftext|>"])
+    tokenizer.save_vocab(os.path.join(DATA_PATH.split(".")[0], "vocab"))
 
