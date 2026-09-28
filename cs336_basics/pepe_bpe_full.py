@@ -59,8 +59,9 @@ def _pretokenize_chunk(text: bytes, pat: bytes, special_tokens_pattern: bytes) -
     for t in re.split(special_tokens_pattern, text):
         if re.fullmatch(special_tokens_pattern, t) is not None:
             yield (t, ), True
-        for word in re.finditer(pat, t):
-            yield tuple(bytes([w,]) for w in word.group()), False
+        else:
+            for word in re.finditer(pat, t):
+                yield tuple(bytes([w,]) for w in word.group()), False
 
 def _pretokenize_chunk_w_frequencies(text: bytes, pat: bytes, special_tokens_pattern: bytes) -> dict[tuple[bytes], int]:
     frequencies: dict[tuple[bytes], int] = defaultdict(int)
@@ -73,7 +74,8 @@ def _create_special_tokens_pattern(special_tokens: list[bytes]) -> bytes:
     tokens = [re.escape(token) for token in special_tokens]
     return b"(" + b"|".join(token for token in tokens) + b")"
 
-def _pretokenize_chunk_from_file(file: str, start: int, end: int, pat: str, special_tokens_pattern: bytes) -> dict[bytes, int]:
+def _pretokenize_chunk_from_file(file: str, start: int, end: int, pat: str, special_tokens_pattern: bytes) -> dict[
+    tuple[bytes], int]:
     with open(file, "rb") as f:
         f.seek(start)
         text = f.read(end - start)
@@ -218,25 +220,30 @@ class PepeBPEFull:
                     })
                 )
 
-    # def encode(self, s: str) -> list[int]:
-    #     # 1. pre-tokenize
-    #     special_tokens_pattern = _create_special_tokens_pattern([s.encode("latin-1") for s in self.special_tokens.keys()])
-    #     pretokenized_tokens_iterator = _pretokenize_chunk(s.encode("utf-8"), PAT, special_tokens_pattern)
-    #     # 2. apply merges
-    #     encoded_tokens: list[int] = []
-    #     for token, is_special in pretokenized_tokens_iterator:
-    #         if is_special:
-    #             encoded_tokens.append(self.vocab.get(token, 0))
-    #         else:
-    #             while len(token) > 1:
-
+    def encode(self, s: str) -> list[int]:
+        # 1. pre-tokenize
+        special_tokens_pattern = _create_special_tokens_pattern([s.encode("latin-1") for s in self.special_tokens.keys()])
+        pretokenized_tokens_iterator = _pretokenize_chunk(s.encode("utf-8"), PAT.encode(), special_tokens_pattern)
+        # 2. apply merges
+        encoded_tokens: list[int] = []
+        for token, is_special in pretokenized_tokens_iterator:
+            if is_special:
+                encoded_tokens.append(self.vocab.get(b"".join(token), 0))
+            else:
+                while len(token) > 1:
+                    best = min(zip(token[:-1], token[1:]), key=lambda x: self.merges.get(x, float("inf")))
+                    if best not in self.merges:
+                        break
+                    token, _ = _replace_pair_in_word(token, best)
+                encoded_tokens.extend((self.vocab.get(t, 0) for t in token))
+        return encoded_tokens
 
 
     def load_vocab(self, vocab_path: str):
         with open(os.path.join(vocab_path, "tokenizer.json"), "r") as f:
             tokens = json.loads(f.read())
             self.last_free_index = int(tokens["last_free_index"])
-            self.tokens = {v.encode("latin-1"): i for v, i in tokens["tokens"]["trained"].items()}
+            self.vocab = {v.encode("latin-1"): i for v, i in tokens["tokens"]["trained"].items()}
             self.special_tokens = tokens["tokens"]["special_tokens"]
             self.merges = {(v[0].encode("latin-1"), v[1].encode("latin-1")): i for i, v in enumerate(tokens["merges"])}
 
@@ -244,6 +251,6 @@ class PepeBPEFull:
 if __name__ == "__main__":
     tokenizer = PepeBPEFull()
     DATA_PATH = "data/TinyStoriesV2-GPT4-train.txt"
-    tokenizer.train_bpe_from_scratch(DATA_PATH, 300, ["<|endoftext|>"])
+    tokenizer.train_bpe_from_scratch(DATA_PATH, 10000, ["<|endoftext|>"])
     tokenizer.save_vocab(os.path.join(DATA_PATH.split(".")[0], "vocab"))
 
