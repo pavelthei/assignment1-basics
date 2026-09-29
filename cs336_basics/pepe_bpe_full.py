@@ -3,7 +3,7 @@ import json
 import regex as re
 from concurrent.futures import ProcessPoolExecutor
 
-from typing import BinaryIO, Iterator
+from typing import BinaryIO, Iterator, Iterable
 from collections import defaultdict
 from tqdm import tqdm
 
@@ -121,6 +121,7 @@ class PepeBPEFull:
 
     def __init__(self):
         self.vocab: dict[bytes, int] = defaultdict(int)
+        self.reverse_vocab: dict[int, bytes] = dict()
         self.special_tokens: dict[bytes, int] = dict()
         self.merges: dict[tuple[bytes, bytes], int] = dict()
         self.last_free_index: int = 0
@@ -205,6 +206,7 @@ class PepeBPEFull:
                 for future in futures:
                     frequencies_chunks.append(future.result())
                 pbar.update(1)
+        self.reverse_vocab = {v: k for k, v in self.vocab.items()}
 
     def save_vocab(self, vocab_path: str):
         os.makedirs(vocab_path, exist_ok=True)
@@ -238,14 +240,22 @@ class PepeBPEFull:
                 encoded_tokens.extend((self.vocab.get(t, 0) for t in token))
         return encoded_tokens
 
+    def encode_iterable(self, s: Iterable[str]) -> Iterator[int]:
+        for sub_str in s:
+            for token in self.encode(sub_str):
+                yield token
+
+    def decode(self, ids: list[int]) -> str:
+        return b"".join([self.reverse_vocab.get(i, b"") for i in ids]).decode("utf-8", errors="replace")
 
     def load_vocab(self, vocab_path: str):
         with open(os.path.join(vocab_path, "tokenizer.json"), "r") as f:
             tokens = json.loads(f.read())
-            self.last_free_index = int(tokens["last_free_index"])
-            self.vocab = {v.encode("latin-1"): i for v, i in tokens["tokens"]["trained"].items()}
-            self.special_tokens = tokens["tokens"]["special_tokens"]
-            self.merges = {(v[0].encode("latin-1"), v[1].encode("latin-1")): i for i, v in enumerate(tokens["merges"])}
+        self.last_free_index = int(tokens["last_free_index"])
+        self.vocab = {v.encode("latin-1"): i for v, i in tokens["tokens"]["trained"].items()}
+        self.reverse_vocab = {v: k for k, v in self.vocab.items()}
+        self.special_tokens = tokens["tokens"]["special_tokens"]
+        self.merges = {(v[0].encode("latin-1"), v[1].encode("latin-1")): i for i, v in enumerate(tokens["merges"])}
 
 
 if __name__ == "__main__":

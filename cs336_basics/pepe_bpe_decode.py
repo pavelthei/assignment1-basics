@@ -5,4 +5,8 @@ if __name__ == '__main__':
     bpe = PepeBPEFull()
     bpe.load_vocab(vocab_path=VOCAB_PATH)
     TEXT = "Hello World!<|endoftext|> How are you?"
-    print(bpe.encode(TEXT))
+    encoded_text = bpe.encode(TEXT)
+    print("ENCODED IDS:", encoded_text)
+    decoded_text = bpe.decode(encoded_text)
+    print("Decoded TEXT:", decoded_text)
+
