@@ -81,15 +81,14 @@ def _pretokenize_chunk_from_file(file: str, start: int, end: int, pat: str, spec
         text = f.read(end - start)
     return _pretokenize_chunk_w_frequencies(text, pat.encode(), special_tokens_pattern)
 
-def _calculate_pair_frequencies(frequencies: dict[tuple[bytes], int]) -> dict[tuple[bytes], int]:
-    pairs_frequencies: dict[tuple[bytes], int] = defaultdict(int)
+def _calculate_pair_frequencies(pairs_frequencies: defaultdict[tuple[bytes, bytes], int], frequencies: dict[tuple[bytes, ...], int]) -> dict[tuple[bytes, ...], int]:
     for word in frequencies.keys():
         for i in range(len(word) - 1):
             pair = (word[i], word[i + 1])
-            pairs_frequencies[pair] += frequencies[word]
-    return pairs_frequencies
+            if pair not in pairs_frequencies:
+                pairs_frequencies[pair] += frequencies[word]
 
-def _replace_pair_in_word(word: tuple[bytes, ...], pair: tuple[bytes, bytes]) -> tuple[list[bytes], bool]:
+def _replace_pair_in_word(word: tuple[bytes, ...], pair: tuple[bytes, bytes]) -> tuple[tuple[bytes, ...], bool]:
     if len(word) < 2:
         return word, False
     new_word = []
@@ -105,8 +104,8 @@ def _replace_pair_in_word(word: tuple[bytes, ...], pair: tuple[bytes, bytes]) ->
             i += 1
     return tuple(new_word), word_changed
 
-def _replace_pair_in_frequencies(frequencies: dict[tuple[bytes], int], pair_to_replace: tuple[bytes, bytes]) -> dict[tuple[bytes], int]:
-    words_to_change: list[tuple[bytes, bytes, int]] = []
+def _replace_pair_in_frequencies(frequencies: dict[tuple[bytes, ...], int], pair_to_replace: tuple[bytes, bytes]) -> list[tuple[bytes, ...]]:
+    words_to_change: list[tuple[tuple[bytes, ...], tuple[bytes, ...], int]] = []
     for word in frequencies.keys():
         new_word, word_changed = _replace_pair_in_word(word, pair_to_replace)
         if word_changed:
@@ -114,7 +113,7 @@ def _replace_pair_in_frequencies(frequencies: dict[tuple[bytes], int], pair_to_r
     for word, new_word, count in words_to_change:
         del frequencies[word]
         frequencies[new_word] = count
-
+    return [w[1] for w in words_to_change]
 
 class PepeBPEFull:
 
@@ -167,7 +166,7 @@ class PepeBPEFull:
             special_tokens_pattern = _create_special_tokens_pattern([s.encode("utf-8") for s in special_tokens])
             chunks = find_chunk_boundaries(f, num_chunks, special_tokens_pattern)
 
-        frequencies: dict[tuple[bytes], int] = defaultdict(int)
+        frequencies: dict[tuple[bytes, ...], int] = defaultdict(int)
 
         with ProcessPoolExecutor(max_workers=num_processes) as executor:
             futures = []
@@ -179,13 +178,16 @@ class PepeBPEFull:
                 for token, count in chunk_vocab.items():
                     frequencies[token] += count
 
-        # frequencies_chunks = [dict(list(frequencies.items())[i::num_processes]) for i in range(num_processes)]
+        pairs_frequencies: dict[tuple[bytes, bytes], int] = defaultdict(int)
+        frequencies_to_pass = frequencies
         # Calculate pair frequencies
         with tqdm(total=vocab_size - len(self.vocab), desc="Merging pairs") as pbar:
             while len(self.vocab) < vocab_size:
-                pairs_frequencies = _calculate_pair_frequencies(frequencies)
+                _calculate_pair_frequencies(pairs_frequencies, frequencies_to_pass)
                 pair = self._merge_most_frequent_pair(pairs_frequencies)
-                _replace_pair_in_frequencies(frequencies, pair)
+                del pairs_frequencies[pair]
+                new_words = _replace_pair_in_frequencies(frequencies, pair)
+                frequencies_to_pass = {w: frequencies[w] for w in new_words}
                 pbar.update(1)
         self.reverse_vocab = {v: k for k, v in self.vocab.items()}
 
@@ -243,5 +245,6 @@ if __name__ == "__main__":
     tokenizer = PepeBPEFull()
     DATA_PATH = "data/TinyStoriesV2-GPT4-train.txt"
     tokenizer.train_bpe_from_scratch(DATA_PATH, 10000, ["<|endoftext|>"])
+    tokenizer.save_vocab(os.path.join(DATA_PATH.split(".")[0], "vocab"))
 
 
