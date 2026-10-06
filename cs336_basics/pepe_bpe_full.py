@@ -32,7 +32,7 @@ def find_chunk_boundaries(
     chunk_boundaries = [i * chunk_size for i in range(desired_num_chunks + 1)]
     chunk_boundaries[-1] = file_size
 
-    mini_chunk_size = 4096  # Read ahead by 4k bytes at a time
+    mini_chunk_size = 4 * 1024  # Read ahead by 4k bytes at a time
 
     for bi in range(1, len(chunk_boundaries) - 1):
         initial_position = chunk_boundaries[bi]
@@ -149,7 +149,7 @@ class PepeBPEFull:
         return final_pair
 
     def train_bpe_from_scratch(self,
-                               input_path: str,
+                               input_path: str | os.PathLike,
                                vocab_size: int,
                                special_tokens: list[str],
                                num_chunks: int = 128,
@@ -180,13 +180,12 @@ class PepeBPEFull:
                 for token, count in chunk_vocab.items():
                     frequencies[token] += count
 
-        frequencies_chunks = [dict(list(frequencies.items())[i::num_processes]) for i in range(num_processes)]
-        # Calculate pair frequencies
-        with tqdm(total=vocab_size - len(self.vocab), desc="Merging pairs") as pbar:
-            while len(self.vocab) < vocab_size:
-                
-                pairs_frequencies: dict[tuple[bytes, bytes], int] = defaultdict(int)
-                with ProcessPoolExecutor(max_workers=num_processes) as executor:
+            frequencies_chunks = [dict(list(frequencies.items())[i::num_processes]) for i in range(num_processes)]
+            # Calculate pair frequencies
+            with tqdm(total=vocab_size - len(self.vocab), desc="Merging pairs") as pbar:
+                while len(self.vocab) < vocab_size:
+
+                    pairs_frequencies: dict[tuple[bytes, bytes], int] = defaultdict(int)
                     futures = []
                     for chunk in frequencies_chunks:
                         futures.append(executor.submit(_calculate_pair_frequencies, chunk))
@@ -196,16 +195,15 @@ class PepeBPEFull:
                         for pair, count in chunk_pairs_frequencies.items():
                             pairs_frequencies[pair] += count
 
-                pair = self._merge_most_frequent_pair(pairs_frequencies)
-                with ProcessPoolExecutor(max_workers=num_processes) as executor:
+                    pair = self._merge_most_frequent_pair(pairs_frequencies)
                     futures = []
                     for chunk in frequencies_chunks:
                         futures.append(executor.submit(_replace_pair_in_frequencies, chunk, pair))
 
-                frequencies_chunks = []
-                for future in futures:
-                    frequencies_chunks.append(future.result())
-                pbar.update(1)
+                    frequencies_chunks = []
+                    for future in futures:
+                        frequencies_chunks.append(future.result())
+                    pbar.update(1)
         self.reverse_vocab = {v: k for k, v in self.vocab.items()}
 
     def save_vocab(self, vocab_path: str):
@@ -260,7 +258,11 @@ class PepeBPEFull:
 
 if __name__ == "__main__":
     tokenizer = PepeBPEFull()
-    DATA_PATH = "data/TinyStoriesV2-GPT4-train.txt"
-    tokenizer.train_bpe_from_scratch(DATA_PATH, 10000, ["<|endoftext|>"])
-    tokenizer.save_vocab(os.path.join(DATA_PATH.split(".")[0], "vocab"))
+    # DATA_PATH = "data/TinyStoriesV2-GPT4-train.txt"
+    # tokenizer.train_bpe_from_scratch(DATA_PATH, 10000, ["<|endoftext|>"])
+    # tokenizer.save_vocab(os.path.join(DATA_PATH.split(".")[0], "vocab"))
+    input_path ="tests/fixtures/corpus.en"
+    tokenizer.train_bpe_from_scratch(input_path, 500, ["<|endoftext|>"])
+    # tokenizer.save_vocab(os.path.join(DATA_PATH.split(".")[0], "vocab"))
+
 
