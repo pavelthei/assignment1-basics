@@ -81,12 +81,17 @@ def _pretokenize_chunk_from_file(file: str, start: int, end: int, pat: str, spec
         text = f.read(end - start)
     return _pretokenize_chunk_w_frequencies(text, pat.encode(), special_tokens_pattern)
 
-def _calculate_pair_frequencies(pairs_frequencies: defaultdict[tuple[bytes, bytes], int], frequencies: dict[tuple[bytes, ...], int]) -> dict[tuple[bytes, ...], int]:
+def _add_pair_frequencies(pairs_frequencies: defaultdict[tuple[bytes, bytes], int], frequencies: dict[tuple[bytes, ...], int]):
     for word in frequencies.keys():
         for i in range(len(word) - 1):
             pair = (word[i], word[i + 1])
-            if pair not in pairs_frequencies:
-                pairs_frequencies[pair] += frequencies[word]
+            pairs_frequencies[pair] += frequencies[word]
+
+def _subtract_pair_frequencies(pairs_frequencies: defaultdict[tuple[bytes, bytes], int], frequencies: dict[tuple[bytes, ...], int]):
+    for word in frequencies.keys():
+        for i in range(len(word) - 1):
+            pair = (word[i], word[i + 1])
+            pairs_frequencies[pair] -= frequencies[word]
 
 def _replace_pair_in_word(word: tuple[bytes, ...], pair: tuple[bytes, bytes]) -> tuple[tuple[bytes, ...], bool]:
     if len(word) < 2:
@@ -104,46 +109,32 @@ def _replace_pair_in_word(word: tuple[bytes, ...], pair: tuple[bytes, bytes]) ->
             i += 1
     return tuple(new_word), word_changed
 
-def _replace_pair_in_frequencies(frequencies: dict[tuple[bytes, ...], int], pair_to_replace: tuple[bytes, bytes]) -> list[tuple[bytes, ...]]:
+def _replace_pair_in_frequencies(frequencies: dict[tuple[bytes, ...], int], pair_to_replace: tuple[bytes, bytes]) -> tuple[list[tuple[bytes, ...]], list[tuple[bytes, ...]]]:
     words_to_change: list[tuple[tuple[bytes, ...], tuple[bytes, ...], int]] = []
     for word in frequencies.keys():
         new_word, word_changed = _replace_pair_in_word(word, pair_to_replace)
         if word_changed:
             words_to_change.append((word, tuple(new_word), frequencies[word]))
     for word, new_word, count in words_to_change:
-        del frequencies[word]
         frequencies[new_word] = count
-    return [w[1] for w in words_to_change]
+    return [w[0] for w in words_to_change], [w[1] for w in words_to_change]
 
 class PepeBPEFull:
 
     def __init__(self):
-        self.vocab: dict[bytes, int] = defaultdict(int)
+        self.vocab: dict[int, bytes] = defaultdict(int)
         self.reverse_vocab: dict[int, bytes] = dict()
         self.special_tokens: dict[bytes, int] = dict()
         self.merges: dict[tuple[bytes, bytes], int] = dict()
         self.last_free_index: int = 0
 
     def _merge_most_frequent_pair(self, pairs_frequencies: dict[tuple[bytes, bytes], int]) -> tuple[bytes, bytes]:
-        if not pairs_frequencies:
-            return
+        final_pair = max(pairs_frequencies, key=lambda p: (pairs_frequencies[p], p))
 
-        sorted_pairs_frequencies = sorted(
-            ((pair, count) for pair, count in pairs_frequencies.items()),
-            key=lambda x: (x[1], x[0][0] + x[0][1]),
-            reverse=True)
-
-        i = 0
-        while i < len(sorted_pairs_frequencies) and sorted_pairs_frequencies[i][0][0] + sorted_pairs_frequencies[i][0][1] in self.vocab:
-            i += 1
-        if i == len(sorted_pairs_frequencies):
-            return
-        final_pair = sorted_pairs_frequencies[i][0]
-
-        self.vocab[self.last_free_index] = sorted_pairs_frequencies[i][0][0] + sorted_pairs_frequencies[i][0][1]
+        self.vocab[self.last_free_index] = final_pair[0] + final_pair[1]
         self.last_free_index += 1
         ind = len(self.merges)
-        self.merges[sorted_pairs_frequencies[i][0]] = ind
+        self.merges[(final_pair[0], final_pair[1])] = ind
         return final_pair
 
     def train_bpe_from_scratch(self,
@@ -153,13 +144,13 @@ class PepeBPEFull:
                                num_chunks: int = 128,
                                num_processes: int = 8,
                                **kwargs):
-        for i in range(256):
-            self.vocab[self.last_free_index] = bytes([i])
-            self.last_free_index += 1
-
         for token in special_tokens:
             self.vocab[self.last_free_index] = token.encode()
             self.special_tokens[token.encode()] = self.last_free_index
+            self.last_free_index += 1
+
+        for i in range(256):
+            self.vocab[self.last_free_index] = bytes([i])
             self.last_free_index += 1
 
         with open(input_path, "rb") as f:
@@ -183,10 +174,13 @@ class PepeBPEFull:
         # Calculate pair frequencies
         with tqdm(total=vocab_size - len(self.vocab), desc="Merging pairs") as pbar:
             while len(self.vocab) < vocab_size:
-                _calculate_pair_frequencies(pairs_frequencies, frequencies_to_pass)
+                _add_pair_frequencies(pairs_frequencies, frequencies_to_pass)
                 pair = self._merge_most_frequent_pair(pairs_frequencies)
-                del pairs_frequencies[pair]
-                new_words = _replace_pair_in_frequencies(frequencies, pair)
+                old_words, new_words = _replace_pair_in_frequencies(frequencies, pair)
+                frequencies_to_pass = {w: frequencies[w] for w in old_words}
+                _subtract_pair_frequencies(pairs_frequencies, frequencies_to_pass)
+                for word in old_words:
+                    del frequencies[word]
                 frequencies_to_pass = {w: frequencies[w] for w in new_words}
                 pbar.update(1)
         self.reverse_vocab = {v: k for k, v in self.vocab.items()}

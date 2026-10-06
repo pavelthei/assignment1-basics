@@ -596,4 +596,4 @@ def run_train_bpe(
     """
     tokenizer = PepeBPEFull()
     tokenizer.train_bpe_from_scratch(input_path, vocab_size, special_tokens)
-    return {v: k for k, v in tokenizer.vocab.items()}, list(tokenizer.merges.keys())
+    return dict(tokenizer.vocab), [k for k, _ in sorted(tokenizer.merges.items(), key=lambda item: item[1])]
