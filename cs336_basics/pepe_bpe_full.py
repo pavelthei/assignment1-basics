@@ -63,6 +63,12 @@ def _pretokenize_chunk(text: bytes, pat: bytes, special_tokens_pattern: bytes) -
             for word in re.finditer(pat, t):
                 yield tuple(bytes([w,]) for w in word.group()), False
 
+def _find_index(lst, element):
+    try:
+        return lst.index(element)
+    except ValueError:
+        return -1
+
 def _pretokenize_chunk_w_frequencies(text: bytes, pat: bytes, special_tokens_pattern: bytes) -> dict[tuple[bytes], int]:
     frequencies: dict[tuple[bytes], int] = defaultdict(int)
     for token, is_special in _pretokenize_chunk(text, pat, special_tokens_pattern):
@@ -71,8 +77,11 @@ def _pretokenize_chunk_w_frequencies(text: bytes, pat: bytes, special_tokens_pat
     return frequencies
 
 def _create_special_tokens_pattern(special_tokens: list[bytes]) -> bytes:
-    tokens = [re.escape(token) for token in special_tokens]
-    return b"(" + b"|".join(token for token in tokens) + b")"
+    if not special_tokens:
+        return b"(?!)"
+
+    tokens = sorted(set(special_tokens), key=len, reverse=True)
+    return b"(" + b"|".join(re.escape(token) for token in tokens) + b")"
 
 def _pretokenize_chunk_from_file(file: str, start: int, end: int, pat: str, special_tokens_pattern: bytes) -> dict[
     tuple[bytes], int]:
@@ -122,9 +131,9 @@ def _replace_pair_in_frequencies(frequencies: dict[tuple[bytes, ...], int], pair
 class PepeBPEFull:
 
     def __init__(self):
-        self.vocab: dict[int, bytes] = defaultdict(int)
-        self.reverse_vocab: dict[int, bytes] = dict()
-        self.special_tokens: dict[bytes, int] = dict()
+        self.vocab: dict[int, bytes] = dict()
+        self.reverse_vocab: dict[bytes, int] = dict()
+        self.special_tokens: list[str] = list()
         self.merges: dict[tuple[bytes, bytes], int] = dict()
         self.last_free_index: int = 0
 
@@ -146,7 +155,7 @@ class PepeBPEFull:
                                **kwargs):
         for token in special_tokens:
             self.vocab[self.last_free_index] = token.encode()
-            self.special_tokens[token.encode()] = self.last_free_index
+            self.special_tokens.append(token)
             self.last_free_index += 1
 
         for i in range(256):
@@ -191,30 +200,30 @@ class PepeBPEFull:
             f.write(
                 json.dumps(
                     {"tokens": {
-                        "trained": {token.decode("latin-1"): i for i, token in self.vocab.items()},
-                        "special_tokens": {token.decode("latin-1"): i for token, i in self.special_tokens.items()},
+                        "trained": {token.decode("Latin-1"): i for i, token in self.vocab.items()},
+                        "special_tokens": self.special_tokens,
                     },
-                     "merges": [[pair[0].decode("latin-1"), pair[1].decode("latin-1")] for pair, _ in sorted(self.merges.items(), key=lambda x: x[1])],
+                     "merges": [[pair[0].decode("Latin-1"), pair[1].decode("Latin-1")] for pair in self.merges],
                      "last_free_index": self.last_free_index,
                     })
                 )
 
     def encode(self, s: str) -> list[int]:
         # 1. pre-tokenize
-        special_tokens_pattern = _create_special_tokens_pattern([s.encode("latin-1") for s in self.special_tokens.keys()])
+        special_tokens_pattern = _create_special_tokens_pattern([st.encode("utf-8") for st in self.special_tokens])
         pretokenized_tokens_iterator = _pretokenize_chunk(s.encode("utf-8"), PAT.encode(), special_tokens_pattern)
         # 2. apply merges
         encoded_tokens: list[int] = []
         for token, is_special in pretokenized_tokens_iterator:
             if is_special:
-                encoded_tokens.append(self.vocab.get(b"".join(token), 0))
+                encoded_tokens.append(self.reverse_vocab.get(b"".join(token), 0))
             else:
                 while len(token) > 1:
                     best = min(zip(token[:-1], token[1:]), key=lambda x: self.merges.get(x, float("inf")))
                     if best not in self.merges:
                         break
                     token, _ = _replace_pair_in_word(token, best)
-                encoded_tokens.extend((self.vocab.get(t, 0) for t in token))
+                encoded_tokens.extend((self.reverse_vocab.get(t, 0) for t in token))
         return encoded_tokens
 
     def encode_iterable(self, s: Iterable[str]) -> Iterator[int]:
@@ -223,16 +232,16 @@ class PepeBPEFull:
                 yield token
 
     def decode(self, ids: list[int]) -> str:
-        return b"".join([self.reverse_vocab.get(i, b"") for i in ids]).decode("utf-8", errors="replace")
+        return b"".join([self.vocab.get(i, b"") for i in ids]).decode("utf-8", errors="replace")
 
     def load_vocab(self, vocab_path: str):
         with open(os.path.join(vocab_path, "tokenizer.json"), "r") as f:
             tokens = json.loads(f.read())
         self.last_free_index = int(tokens["last_free_index"])
-        self.vocab = {v.encode("latin-1"): i for v, i in tokens["tokens"]["trained"].items()}
+        self.vocab = {i: v.encode("Latin-1") for v, i in tokens["tokens"]["trained"].items()}
         self.reverse_vocab = {v: k for k, v in self.vocab.items()}
         self.special_tokens = tokens["tokens"]["special_tokens"]
-        self.merges = {(v[0].encode("latin-1"), v[1].encode("latin-1")): i for i, v in enumerate(tokens["merges"])}
+        self.merges = {(v[0].encode("Latin-1"), v[1].encode("Latin-1")): i for i, v in enumerate(tokens["merges"])}
 
 
 if __name__ == "__main__":

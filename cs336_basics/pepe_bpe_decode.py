@@ -4,7 +4,9 @@ if __name__ == '__main__':
     VOCAB_PATH = "data/TinyStoriesV2-GPT4-train/vocab"
     bpe = PepeBPEFull()
     bpe.load_vocab(vocab_path=VOCAB_PATH)
-    TEXT = "Hello World!<|endoftext|> How are you?"
+    bpe.special_tokens = []
+    TEXT = "Hello World!<|endoftext|> How are you? 🙃"
+    # TEXT = ""
     encoded_text = bpe.encode(TEXT)
     print("ENCODED IDS:", encoded_text)
     decoded_text = bpe.decode(encoded_text)
