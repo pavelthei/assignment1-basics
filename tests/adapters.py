@@ -11,7 +11,7 @@ from torch import Tensor
 from torch import nn
 
 from cs336_basics.pepe_bpe_full import PepeBPEFull
-from cs336_basics.pepe_modules import Linear
+from cs336_basics.pepe_modules import *
 
 
 def run_linear(
@@ -55,8 +55,12 @@ def run_embedding(
     Returns:
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
-
-    raise NotImplementedError
+    emb = Embedding(
+        num_embeddings=vocab_size,
+        embeddings_dim=d_model,
+    )
+    emb.embeddings = nn.Parameter(weights)
+    return emb(token_ids)
 
 
 def run_swiglu(
