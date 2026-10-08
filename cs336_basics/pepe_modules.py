@@ -85,8 +85,36 @@ class RMSNorm(nn.Module):
         return x.to(in_dtype)
 
 
+class SwiGLU(nn.Module):
+
+    def __init__(self,
+                 d_model: int,
+                 device: torch.device | None = None,
+                 dtype: torch.dtype | None = None
+                 ):
+        super(SwiGLU, self).__init__()
+        self.d_model = d_model
+        self.device = device
+        self.dtype = dtype
+        d_ff = 8 * d_model // 3
+        self.w1 = Linear(d_model, d_ff, device=device, dtype=dtype)
+        self.w3 = Linear(d_model, d_ff, device=device, dtype=dtype)
+        self.w2 = Linear(d_ff, d_model, device=device, dtype=dtype)
+
+    @staticmethod
+    def swish(x: torch.FloatTensor):
+        return x * torch.sigmoid(x)
+
+    def forward(self, x: torch.FloatTensor):
+        x1 = self.w1(x)
+        x2 = self.w3(x)
+        x = self.swish(x1) * x2
+        x = self.w2(x)
+        return x
+
+
 if __name__ == "__main__":
-    norm_layer = RMSNorm(7)
-    ids = torch.randn((5, 7))
+    norm_layer = SwiGLU(192)
+    ids = torch.randn((5, 192))
     out = norm_layer(ids)
     print(out.shape)
