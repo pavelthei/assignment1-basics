@@ -112,9 +112,21 @@ class SwiGLU(nn.Module):
         x = self.w2(x)
         return x
 
+class RoPE(nn.Module):
+    def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
+        super().__init__()
+        theta_k = 1.0 / (theta ** (torch.arange(0, d_k, 2, device=device, dtype=torch.float32) / d_k))
+        pos = torch.arange(max_seq_len, device=device, dtype=torch.float32)
+        thetas = torch.outer(pos, theta_k).repeat_interleave(2, dim=-1)  # T x d
+        self.register_buffer("sins", thetas.sin(), persistent=False)
+        self.register_buffer("coss", thetas.cos(), persistent=False)
+
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
+        x1, x2 = x[..., 0::2], x[..., 1::2]
+        xx = torch.stack([-x2, x1], dim=-1).flatten(-2)  # [-x1, x0, -x3, x2, ...]
+        return x * self.coss[token_positions] + xx * self.sins[token_positions]
 
 if __name__ == "__main__":
-    norm_layer = SwiGLU(192)
-    ids = torch.randn((5, 192))
-    out = norm_layer(ids)
-    print(out.shape)
+    rope = RoPE(10000, 128, 1024)
+    in_features = torch.randn((2, 10, 128))
+    out = rope(in_features, torch.randint(0, 128, (2, 10)))
