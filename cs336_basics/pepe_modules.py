@@ -137,6 +137,20 @@ class RoPE(nn.Module):
         xx = torch.stack([-x2, x1], dim=-1).flatten(-2)  # [-x1, x0, -x3, x2, ...]
         return x * self.coss[token_positions] + xx * self.sins[token_positions]
 
+
+class ScaledDotProduct(nn.Module):
+    def __init__(self, d_k: int):
+        super().__init__()
+        self.d_k = d_k
+        self.softmax = Softmax()
+
+    def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, mask: torch.BoolTensor | None = None) -> torch.Tensor:
+        logits = einsum(q, k, "... seq_queries d_k, ... seq_keys d_k -> ... seq_queries seq_keys") / math.sqrt(self.d_k)
+        if mask is not None:
+            logits = logits.masked_fill(~mask, float("-inf"))
+        weights = self.softmax(logits, -1)
+        return einsum(weights, v, "... seq_queries seq_keys, ... seq_keys d_v -> ... seq_queries d_v")
+
 if __name__ == "__main__":
     rope = RoPE(10000, 128, 1024)
     in_features = torch.randn((2, 10, 128))

@@ -114,7 +114,8 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
-    raise NotImplementedError
+    sdpa = ScaledDotProduct(Q.shape[-1])
+    return sdpa(Q, K, V, mask)
 
 
 def run_multihead_self_attention(
