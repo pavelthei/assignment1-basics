@@ -4,6 +4,17 @@ import torch.nn as nn
 
 from einops import einsum
 
+
+class Softmax(nn.Module):
+
+    def __init__(self) -> None:
+        super(Softmax, self).__init__()
+
+    def forward(self, x: torch.Tensor, i: int) -> torch.Tensor:
+        x = x - torch.amax(x, dim=i, keepdim=True)
+        return torch.exp(x) / torch.sum(torch.exp(x), dim=i, keepdim=True)
+
+
 class Linear(nn.Module):
 
     def __init__(self,
