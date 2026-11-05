@@ -216,6 +216,32 @@ class TransformerBlock(nn.Module):
         return x
 
 
+class TransformerLM(nn.Module):
+    def __init__(self,
+                 vocab_size: int,
+                 d_model: int,
+                 num_heads: int,
+                 d_ff: int,
+                 num_layers: int,
+                 context_length: int,
+                 theta: float):
+        super().__init__()
+        self.embedding = Embedding(vocab_size, d_model)
+        self.layers = nn.ModuleList([
+            TransformerBlock(d_model, num_heads, d_ff, context_length, theta)
+            for _ in range(num_layers)
+        ])
+        self.norm = RMSNorm(d_model)
+        self.output_layer = Linear(d_model, vocab_size)
+
+    def forward(self, x: torch.LongTensor) -> torch.Tensor:
+        x = self.embedding(x)
+        for layer in self.layers:
+            x = layer(x)
+        x = self.norm(x)
+        return self.output_layer(x)
+
+
 
 if __name__ == "__main__":
     rope = RoPE(10000, 128, 1024)
