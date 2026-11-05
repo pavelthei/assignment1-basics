@@ -25,7 +25,7 @@ class Linear(nn.Module):
         super(Linear, self).__init__()
         self.device = device
         std = math.sqrt(2 / (in_features + out_features))
-        self.w = nn.Parameter(nn.init.trunc_normal_(torch.ones(in_features, out_features),
+        self.w = nn.Parameter(nn.init.trunc_normal_(torch.ones(out_features, in_features),
                                                              mean=0.0,
                                                              std=std,
                                                              a=-3*std,
@@ -38,7 +38,7 @@ class Linear(nn.Module):
             self.w = self.w.to(self.device)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return einsum(x, self.w, "... d_in, d_in d_out -> ... d_out")
+        return einsum(x, self.w, "... d_in, d_out d_in -> ... d_out")
 
 
 class Embedding(nn.Module):
@@ -100,6 +100,7 @@ class SwiGLU(nn.Module):
 
     def __init__(self,
                  d_model: int,
+                 d_ff: int | None = None,
                  device: torch.device | None = None,
                  dtype: torch.dtype | None = None
                  ):
@@ -107,7 +108,7 @@ class SwiGLU(nn.Module):
         self.d_model = d_model
         self.device = device
         self.dtype = dtype
-        d_ff = 8 * d_model // 3
+        d_ff = 8 * d_model // 3 if d_ff is None else d_ff
         self.w1 = Linear(d_model, d_ff, device=device, dtype=dtype)
         self.w3 = Linear(d_model, d_ff, device=device, dtype=dtype)
         self.w2 = Linear(d_ff, d_model, device=device, dtype=dtype)
@@ -191,6 +192,28 @@ class MultiHeadAttention(nn.Module):
         attn = self.se(q, k, v, mask)
         attn = rearrange(attn, "... h seq d -> ... seq (h d)")
         return einsum(attn, self.w_o, "... seq i, o i -> ... seq o")
+
+
+class TransformerBlock(nn.Module):
+    def __init__(self,
+                 d_model: int,
+                 num_heads: int,
+                 d_ff: int,
+                 max_seq_len: int,
+                 theta: float):
+        super().__init__()
+        rope = RoPE(theta, d_model // num_heads, max_seq_len)
+        self.mha = MultiHeadAttention(d_model, num_heads, rope)
+        self.norm1 = RMSNorm(d_model)
+        self.norm2 = RMSNorm(d_model)
+        self.ffn = SwiGLU(d_model, d_ff=d_ff)
+
+    def forward(self,
+                x: torch.Tensor) -> torch.Tensor:
+        token_positions = torch.arange(x.shape[-2], device=x.device)
+        x = x + self.mha(self.norm1(x), token_positions)
+        x = x + self.ffn(self.norm2(x))
+        return x
 
 
 

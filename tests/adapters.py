@@ -89,10 +89,10 @@ def run_swiglu(
     # If your state dict keys match, you can use `load_state_dict()`
     # swiglu.load_state_dict(weights)
     # You can also manually assign the weights
-    swiglu = SwiGLU(d_model)
-    swiglu.w1.w = nn.Parameter(w1_weight.T)
-    swiglu.w2.w = nn.Parameter(w2_weight.T)
-    swiglu.w3.w = nn.Parameter(w3_weight.T)
+    swiglu = SwiGLU(d_model, d_ff=d_ff)
+    swiglu.w1.w = nn.Parameter(w1_weight)
+    swiglu.w2.w = nn.Parameter(w2_weight)
+    swiglu.w3.w = nn.Parameter(w3_weight)
     return swiglu(in_features)
 
 
@@ -301,7 +301,20 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    transformer_block = TransformerBlock(d_model, num_heads, d_ff, max_seq_len, theta)
+    transformer_block.load_state_dict({
+        "mha.w_q": weights["attn.q_proj.weight"],
+        "mha.w_k": weights["attn.k_proj.weight"],
+        "mha.w_v": weights["attn.v_proj.weight"],
+        "mha.w_o": weights["attn.output_proj.weight"],
+        "norm1.g": weights["ln1.weight"],
+        "norm2.g": weights["ln2.weight"],
+        "ffn.w1.w": weights["ffn.w1.weight"],
+        "ffn.w2.w": weights["ffn.w2.weight"],
+        "ffn.w3.w": weights["ffn.w3.weight"],
+    })
+    return transformer_block(in_features)
+
 
 
 def run_transformer_lm(
