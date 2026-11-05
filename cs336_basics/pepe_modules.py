@@ -2,7 +2,7 @@ import math
 import torch
 import torch.nn as nn
 
-from einops import einsum
+from einops import einsum, rearrange
 
 
 class Softmax(nn.Module):
@@ -123,6 +123,7 @@ class SwiGLU(nn.Module):
         x = self.w2(x)
         return x
 
+
 class RoPE(nn.Module):
     def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
         super().__init__()
@@ -150,6 +151,48 @@ class ScaledDotProduct(nn.Module):
             logits = logits.masked_fill(~mask, float("-inf"))
         weights = self.softmax(logits, -1)
         return einsum(weights, v, "... seq_queries seq_keys, ... seq_keys d_v -> ... seq_queries d_v")
+
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self,
+                 d_model: int,
+                 num_heads: int,
+                 rope: RoPE | None = None):
+        super().__init__()
+        self.d_model = d_model
+        self.w_q, self.w_k, self.w_v, self.w_o = (
+            nn.Parameter(torch.empty(d_model, d_model)) for _ in range(4)
+        )
+        std = (1 / d_model) ** 0.5  # sqrt(2 / (d_model + d_model))
+        for w in (self.w_q, self.w_k, self.w_v, self.w_o):
+            nn.init.trunc_normal_(w, mean=0.0, std=std, a=-3 * std, b=3 * std)
+        self.d_k = d_model // num_heads
+        self.num_heads = num_heads
+        self.se = ScaledDotProduct(self.d_k)
+        self.rope = rope
+
+    def forward(self,
+                x: torch.Tensor,
+                token_positions: torch.LongTensor | None = None) -> torch.Tensor:
+        projection_operation = "... seq i, o i -> ... seq o"
+        seq_len = x.shape[-2]
+        q = einsum(x, self.w_q, projection_operation)
+        k = einsum(x, self.w_k, projection_operation)
+        v = einsum(x, self.w_v, projection_operation)
+
+        q, k, v = (
+            rearrange(m, "... seq (h d) -> ... h seq d", h=self.num_heads)
+            for m in (q, k, v)
+        )
+        if self.rope and token_positions is not None:
+            q = self.rope(q, token_positions)
+            k = self.rope(k, token_positions)
+        mask = torch.tril(torch.ones((seq_len, seq_len), dtype=torch.bool, device=x.device))
+        attn = self.se(q, k, v, mask)
+        attn = rearrange(attn, "... h seq d -> ... seq (h d)")
+        return einsum(attn, self.w_o, "... seq i, o i -> ... seq o")
+
+
 
 if __name__ == "__main__":
     rope = RoPE(10000, 128, 1024)
