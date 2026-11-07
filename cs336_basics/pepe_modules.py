@@ -12,7 +12,8 @@ class Softmax(nn.Module):
 
     def forward(self, x: torch.Tensor, i: int) -> torch.Tensor:
         x = x - torch.amax(x, dim=i, keepdim=True)
-        return torch.exp(x) / torch.sum(torch.exp(x), dim=i, keepdim=True)
+        exps = torch.exp(x)
+        return exps / torch.sum(exps, dim=i, keepdim=True)
 
 
 class Linear(nn.Module):
