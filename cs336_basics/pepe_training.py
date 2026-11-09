@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 
+from math import cos, pi
+
 
 def pepe_crossentropy(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     logits = logits - torch.amax(logits, dim=-1, keepdim=True).detach()
@@ -9,6 +11,17 @@ def pepe_crossentropy(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tenso
 @torch.no_grad()
 def pepe_perplexity(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     return torch.exp(pepe_crossentropy(logits, labels))
+
+@torch.no_grad()
+def cosine_lr_schedule(it: int, lr_max: float, lr_min: float, warmup_iters: int, cosine_cycle_iters: int):
+    diff = cosine_cycle_iters - warmup_iters
+    lr_diff = lr_max - lr_min
+    if it < warmup_iters:
+        return it * lr_max / warmup_iters
+    elif warmup_iters <= it <= cosine_cycle_iters:
+        coef = (it - warmup_iters) / diff
+        return lr_min + (1 + cos(coef * pi)) * lr_diff/ 2
+    return lr_min
 
 class PepeAdamW(torch.optim.Optimizer):
 
