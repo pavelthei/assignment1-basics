@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from typing import Iterable
 
 from math import cos, pi
 
@@ -22,6 +23,24 @@ def cosine_lr_schedule(it: int, lr_max: float, lr_min: float, warmup_iters: int,
         coef = (it - warmup_iters) / diff
         return lr_min + (1 + cos(coef * pi)) * lr_diff/ 2
     return lr_min
+
+def gradient_clipping(
+    params: Iterable[torch.nn.Parameter],
+    max_l2_norm: float,
+) -> float:
+    params = [p for p in params if p.grad is not None]
+    if not params:
+        return 0.0
+
+    # global L2 norm:  sqrt( Σ ‖gᵢ‖² )
+    total_norm = torch.sqrt(sum(p.grad.norm(2) ** 2 for p in params))
+
+    if total_norm >= max_l2_norm:
+        scale = max_l2_norm / (total_norm + 1e-6)
+        for p in params:
+            p.grad.mul_(scale)          # in-place, no extra alloc
+        return total_norm.item()
+    return total_norm.item()
 
 class PepeAdamW(torch.optim.Optimizer):
 
