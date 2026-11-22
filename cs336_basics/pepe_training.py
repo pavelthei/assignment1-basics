@@ -1,6 +1,6 @@
 import torch
-import torch.nn as nn
 from typing import Iterable
+import numpy.typing as npt
 
 from math import cos, pi
 
@@ -41,6 +41,21 @@ def gradient_clipping(
             p.grad.mul_(scale)          # in-place, no extra alloc
         return total_norm.item()
     return total_norm.item()
+
+def get_batch(
+    dataset: npt.NDArray,
+    batch_size: int,
+    context_length: int,
+    device: str
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+    dataset = torch.Tensor(dataset).to(device)
+    inp = dataset[:-1]
+    target = dataset[1:]
+
+    samples_idx = torch.randint(0, dataset.shape[0] - context_length, (batch_size, ), device=device)
+    samples_idx = samples_idx[:, None] + torch.arange(context_length, device=device)
+    return inp[samples_idx], target[samples_idx]
+
 
 class PepeAdamW(torch.optim.Optimizer):
 
