@@ -1,4 +1,6 @@
+import os
 import torch
+import typing
 from typing import Iterable
 import numpy.typing as npt
 
@@ -55,6 +57,26 @@ def get_batch(
     samples_idx = torch.randint(0, dataset.shape[0] - context_length, (batch_size, ), device=device)
     samples_idx = samples_idx[:, None] + torch.arange(context_length, device=device)
     return inp[samples_idx], target[samples_idx]
+
+
+def save_checkpoint(model: torch.nn.Module,
+                    optimizer: torch.optim.Optimizer,
+                    out: str | os.PathLike | typing.BinaryIO | typing.IO[bytes],
+                    iteration: int) -> None:
+    torch.save({
+        "model_state": model.state_dict(),
+        "optimizer_state": optimizer.state_dict(),
+        "iteration": iteration,
+    }, out)
+
+
+def load_checkpoint(src: str | os.PathLike | typing.BinaryIO | typing.IO[bytes],
+                    model: torch.nn.Module,
+                    optimizer: torch.optim.Optimizer) -> int:
+    state = torch.load(src)
+    model.load_state_dict(state["model_state"])
+    optimizer.load_state_dict(state["optimizer_state"])
+    return state["iteration"]
 
 
 class PepeAdamW(torch.optim.Optimizer):
